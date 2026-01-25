@@ -4,56 +4,79 @@ const path = require('path');
 const axios = require('axios');
 
 // --- CẤU HÌNH ---
-const BASE_URL = 'https://dragonballwiki.net/doctruyen/dragon-ball-goc/chap-';
-const START_CHAP = 409;
-const END_CHAP = 520;
-const OUTPUT_DIR = './DragonBall_Manga';
+// URL mẫu: https://truyenqqno.com/truyen-tranh/inu-yashiki-232-chap-1.html
+const BASE_URL = 'https://truyenqqno.com/truyen-tranh/inu-yashiki-232-chap-'; 
+const START_CHAP = 11;           // Bắt đầu từ chap 1
+const END_CHAP = 85.1;            // Kết thúc ở chap 10
+const OUTPUT_DIR = './InuYashiki_Manga';
 
-const CONCURRENT_LIMIT = 14;   // Tải 10 ảnh cùng lúc
-const MAX_CHAP_RETRIES = 3;    // Số lần thử lại cả Chapter nếu bị treo
-const CHAP_TIMEOUT_MS = 60000; // 45 giây. (30s hơi gắt nếu mạng chậm, mình để 45s cho an toàn, bạn có thể sửa thành 30000)
+// Các đuôi mở rộng cần thử. Ví dụ: '' (chap-1), '-1' (chap-1-1), '-5' (chap-1-5)
+const TRY_SUFFIXES = ['', '-1', '-5']; 
 
-// --- HÀM HELPER ---
+const CONCURRENT_LIMIT = 10;    
+const IMG_RETRY_LIMIT = 3;      
+const CHAP_TIMEOUT_MS = 60000;  // Tăng lên 60s vì TruyenQQ đôi khi load lâu
+const MAX_CHAP_RETRIES = 3;     
 
-// Hàm log có thời gian
-function log(message) {
+// --- CÁC SELECTOR (Cập nhật cho TruyenQQ) ---
+// TruyenQQ thường dùng .page-chapter img hoặc .story-see-content img
+const IMG_SELECTOR = '.page-chapter img, .story-see-content img'; 
+
+// --- UTILS ---
+function log(msg) {
     const now = new Date();
-    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-    console.log(`[${time}] ${message}`);
+    const time = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+    console.log(`[${time}] ${msg}`);
 }
 
-// Hàm sleep
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Hàm tải 1 ảnh (giữ nguyên logic cũ nhưng gọn hơn)
-async function downloadImage(url, folderPath, index) {
-    try {
-        const ext = path.extname(url) || '.jpg';
-        const fileName = `${index.toString().padStart(3, '0')}${ext}`;
-        const filePath = path.resolve(folderPath, fileName);
+const sanitizeName = (name) => name.replace(/[^a-z0-9\s-_]/gi, '').trim();
 
-        const response = await axios({
-            url, method: 'GET', responseType: 'stream', timeout: 10000
-        });
+// --- LOGIC TẢI ẢNH ---
+async function downloadImage(url, folderPath, index, refererUrl) {
+    if (url.includes('transparent') || url.includes('loading')) return true;
 
-        const writer = fs.createWriteStream(filePath);
-        response.data.pipe(writer);
+    const ext = path.extname(url).split('?')[0] || '.jpg';
+    const fileName = `${index.toString().padStart(3, '0')}${ext}`;
+    const filePath = path.resolve(folderPath, fileName);
 
-        return new Promise((resolve, reject) => {
-            writer.on('finish', () => resolve(fileName));
-            writer.on('error', reject);
-        });
-    } catch (e) {
-        return null; // Lỗi ảnh thì bỏ qua luôn để không ảnh hưởng luồng chính
+    for (let attempt = 1; attempt <= IMG_RETRY_LIMIT; attempt++) {
+        try {
+            const response = await axios({
+                url, 
+                method: 'GET', 
+                responseType: 'stream', 
+                timeout: 15000,
+                headers: { 
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': refererUrl 
+                } 
+            });
+
+            const writer = fs.createWriteStream(filePath);
+            response.data.pipe(writer);
+
+            return await new Promise((resolve, reject) => {
+                writer.on('finish', () => resolve(true));
+                writer.on('error', reject);
+            });
+        } catch (e) {
+            if (attempt === IMG_RETRY_LIMIT) {
+                log(`❌ Bỏ qua ảnh ${index} (${url}): ${e.message}`);
+                return false;
+            }
+            await sleep(1500); 
+        }
     }
 }
 
-// Hàm cuộn trang
+// --- AUTO SCROLL ---
 async function autoScroll(page) {
     await page.evaluate(async () => {
         await new Promise((resolve) => {
             let totalHeight = 0;
-            const distance = 300; // Cuộn mạnh hơn
+            const distance = 400; 
             const timer = setInterval(() => {
                 const scrollHeight = document.body.scrollHeight;
                 window.scrollBy(0, distance);
@@ -67,93 +90,129 @@ async function autoScroll(page) {
     });
 }
 
-// --- LOGIC XỬ LÝ 1 CHAPTER ---
-async function processChapter(page, chap) {
-    const url = `${BASE_URL}${chap}.html`;
-    log(`📖 Bắt đầu Chap ${chap}: ${url}`);
-
-    // 1. Vào trang
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+// --- XỬ LÝ 1 CHAPTER ---
+async function processOneChapter(page, currentUrl, folderName) {
+    log(`📖 Đang thử: ${currentUrl}`);
     
-    // 2. Cuộn
-    // log(`⏳ Đang cuộn trang...`);
+    // Tăng timeout load trang
+    await page.goto(currentUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+
+    // --- CHECK REDIRECT (QUAN TRỌNG) ---
+    // Nếu URL bị đổi về trang chủ hoặc không chứa 'chap-', tức là chap không tồn tại
+    const finalUrl = page.url();
+    if (finalUrl === 'https://truyenqqno.com/' || !finalUrl.includes('chap-')) {
+        throw new Error('REDIRECT_HOME'); // Ném lỗi đặc biệt để không retry
+    }
+
+    // 1. Auto Scroll
     await autoScroll(page);
+    
+    // 2. Quét link ảnh
+    const imgUrls = await page.evaluate((selector) => {
+        const images = document.querySelectorAll(selector);
+        return Array.from(images).map(img => {
+            return img.getAttribute('data-original') || img.getAttribute('data-src') || img.src;
+        }).filter(src => src && !src.startsWith('data:')); 
+    }, IMG_SELECTOR);
 
-    // 3. Lấy link
-    const imgUrls = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('.chapter-content img')).map(img => img.src);
-    });
+    if (imgUrls.length === 0) throw new Error("Không tìm thấy ảnh nào! (Selector sai hoặc bị chặn)");
 
-    if (imgUrls.length === 0) throw new Error("Không tìm thấy ảnh nào!");
+    log(`   📥 Tìm thấy ${imgUrls.length} ảnh. Lưu vào "${folderName}"...`);
 
-    log(`📥 Tìm thấy ${imgUrls.length} ảnh. Đang tải...`);
+    // 3. Tạo thư mục
+    const fullFolderPath = path.join(OUTPUT_DIR, folderName);
+    if (!fs.existsSync(fullFolderPath)) fs.mkdirSync(fullFolderPath, { recursive: true });
 
-    // 4. Tạo folder
-    const chapFolder = path.join(OUTPUT_DIR, `Chap_${chap}`);
-    if (!fs.existsSync(chapFolder)) fs.mkdirSync(chapFolder, { recursive: true });
-
-    // 5. Tải ảnh (Batching)
+    // 4. Tải Batch
     for (let i = 0; i < imgUrls.length; i += CONCURRENT_LIMIT) {
         const chunk = imgUrls.slice(i, i + CONCURRENT_LIMIT);
-        const tasks = chunk.map((u, k) => downloadImage(u, chapFolder, i + k + 1));
+        const tasks = chunk.map((url, k) => downloadImage(url, fullFolderPath, i + k + 1, currentUrl));
         await Promise.all(tasks);
     }
-    
-    return true; // Thành công
+
+    log(`✅ Xong chap: ${folderName}`);
+    return true;
 }
 
-// --- LOGIC CHÍNH ---
+// --- MAIN LOOP ---
 (async () => {
-    log('🚀 Khởi động (Auto Timeout Mode)...');
+    log('🚀 Khởi động TruyenQQ Downloader (Hỗ trợ sub-chap)...');
     
-    const browser = await puppeteer.launch({ headless: "new" }); // Headless mới
+    const browser = await puppeteer.launch({ 
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
     const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Chặn request rác tối đa
+    // Chặn request rác
     await page.setRequestInterception(true);
     page.on('request', (req) => {
         const type = req.resourceType();
-        if (['font', 'stylesheet', 'media', 'image'].includes(type) && !req.url().includes('imgbox')) {
-            // Chặn image rác, chỉ cho phép image từ host truyện (thường mình chặn hết image lúc load trang HTML để nhanh, chỉ tải image lúc axios gọi)
-            // Tuy nhiên để an toàn, chỉ chặn font/css
-             if (type !== 'image') req.abort();
-             else req.continue();
+        const url = req.url();
+        if (['font', 'stylesheet', 'media'].includes(type) || url.includes('google') || url.includes('facebook')) {
+            req.abort();
         } else {
             req.continue();
         }
     });
 
-    for (let chap = START_CHAP; chap <= END_CHAP; chap++) {
-        let success = false;
+    // Vòng lặp chính qua các số Chap
+    for (let i = START_CHAP; i <= END_CHAP; i++) {
+        
+        // Vòng lặp phụ: Thử các biến thể (chap-1, chap-1-1, chap-1-5)
+        for (const suffix of TRY_SUFFIXES) {
+            const chapNum = i.toString(); 
+            // Tạo slug: ví dụ chap-1, chap-1-5
+            const urlSlug = `chap-${chapNum}${suffix}`; 
+            
+            // Tạo tên folder: Chap_001, Chap_001_5
+            let folderName = `Chap_${chapNum.padStart(3, '0')}`;
+            if (suffix) folderName += suffix.replace('-', '_'); // Chap_001_5
 
-        // Vòng lặp Retry cho cả Chapter
-        for (let attempt = 1; attempt <= MAX_CHAP_RETRIES; attempt++) {
-            try {
-                // Đua (Race) giữa logic tải và đồng hồ đếm ngược
-                // Nếu processChapter chạy lâu hơn CHAP_TIMEOUT_MS -> văng lỗi Timeout
-                await Promise.race([
-                    processChapter(page, chap),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), CHAP_TIMEOUT_MS))
-                ]);
+            const currentUrl = `${BASE_URL.replace('chap-', '')}${urlSlug}.html`;
 
-                success = true;
-                log(`✅ Hoàn thành Chap ${chap}`);
-                break; // Xong thì thoát vòng lặp retry
+            let success = false;
+            let skipRetry = false; // Cờ để bỏ qua retry nếu chap không tồn tại
 
-            } catch (error) {
-                log(`⚠️  Lỗi Chap ${chap} (Lần ${attempt}/${MAX_CHAP_RETRIES}): ${error.message}`);
-                
-                if (attempt < MAX_CHAP_RETRIES) {
-                    log(`🔄 Đang reload và thử lại sau 2s...`);
-                    await sleep(2000); // Nghỉ chút rồi thử lại
-                    try { await page.reload(); } catch(e){} // Cố gắng reload
-                } else {
-                    log(`❌ FAILED Chap ${chap}: Bỏ qua sau 3 lần thử.`);
+            for (let attempt = 1; attempt <= MAX_CHAP_RETRIES; attempt++) {
+                try {
+                    await Promise.race([
+                        processOneChapter(page, currentUrl, folderName),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), CHAP_TIMEOUT_MS))
+                    ]);
+
+                    success = true;
+                    break; 
+
+                } catch (error) {
+                    // Nếu lỗi là do Redirect về Home -> Chap không tồn tại -> Dừng ngay
+                    if (error.message === 'REDIRECT_HOME') {
+                        // log(`   ⏭️  Bỏ qua "${urlSlug}" (Không tồn tại/Redirect Home).`);
+                        skipRetry = true;
+                        break; 
+                    }
+
+                    log(`⚠️  Lỗi "${folderName}" (Lần ${attempt}): ${error.message}`);
+                    
+                    if (attempt < MAX_CHAP_RETRIES) {
+                        log(`   🔄 Reload...`);
+                        try { await page.reload({ waitUntil: 'domcontentloaded' }); } catch(e){}
+                    } else {
+                        log(`❌ BỎ QUA "${folderName}".`);
+                    }
                 }
+            }
+            
+            // Nếu chap chính (không có suffix) mà bị skipRetry -> Có thể truyện này không có chap đó
+            // Nếu là chap phụ (.5) bị skipRetry -> Chuyện bình thường
+            if (skipRetry && suffix === '') {
+                log(`ℹ️  Chap ${chapNum} gốc không tồn tại.`);
             }
         }
     }
 
-    log('🎉 ĐÃ XONG TOÀN BỘ!');
+    log('🏁 Đã hoàn thành.');
     await browser.close();
 })();
