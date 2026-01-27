@@ -5,13 +5,13 @@ const axios = require('axios');
 
 // --- CẤU HÌNH ---
 // URL mẫu: https://truyenqqno.com/truyen-tranh/inu-yashiki-232-chap-1.html
-const BASE_URL = 'https://truyenqqno.com/truyen-tranh/inu-yashiki-232-chap-'; 
-const START_CHAP = 11;           // Bắt đầu từ chap 1
-const END_CHAP = 85.1;            // Kết thúc ở chap 10
-const OUTPUT_DIR = './InuYashiki_Manga';
+const BASE_URL = 'https://truyenqqno.com/truyen-tranh/minimum-12331-chap-'; 
+const START_CHAP = 25;           // Bắt đầu từ chap 1
+const END_CHAP = 58;            // Kết thúc ở chap 10
+const OUTPUT_DIR = './Minimum';
 
 // Các đuôi mở rộng cần thử. Ví dụ: '' (chap-1), '-1' (chap-1-1), '-5' (chap-1-5)
-const TRY_SUFFIXES = ['', '-1', '-5']; 
+const TRY_SUFFIXES = ['', '-5']; 
 
 const CONCURRENT_LIMIT = 10;    
 const IMG_RETRY_LIMIT = 3;      
