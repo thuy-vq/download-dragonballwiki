@@ -5,17 +5,17 @@ const axios = require('axios');
 
 // --- CẤU HÌNH ---
 // URL mẫu: https://truyenqqno.com/truyen-tranh/inu-yashiki-232-chap-1.html
-const BASE_URL = 'https://truyenqqno.com/truyen-tranh/minimum-12331-chap-'; 
-const START_CHAP = 25;           // Bắt đầu từ chap 1
-const END_CHAP = 58;            // Kết thúc ở chap 10
-const OUTPUT_DIR = './Minimum';
+const BASE_URL = 'https://truyenqqno.com/truyen-tranh/cuon-so-thien-menh-7069-chap-'; 
+const START_CHAP = 1;           // Bắt đầu từ chap 1
+const END_CHAP = 114;            // Kết thúc ở chap 10
+const OUTPUT_DIR = './Death-note'; // Thư mục lưu trữ
 
 // Các đuôi mở rộng cần thử. Ví dụ: '' (chap-1), '-1' (chap-1-1), '-5' (chap-1-5)
-const TRY_SUFFIXES = ['', '-5']; 
+const TRY_SUFFIXES = ['']; 
 
 const CONCURRENT_LIMIT = 10;    
-const IMG_RETRY_LIMIT = 3;      
-const CHAP_TIMEOUT_MS = 60000;  // Tăng lên 60s vì TruyenQQ đôi khi load lâu
+const IMG_RETRY_LIMIT = 5;      
+const CHAP_TIMEOUT_MS = 120000;  // Tăng lên 60s vì TruyenQQ đôi khi load lâu
 const MAX_CHAP_RETRIES = 3;     
 
 // --- CÁC SELECTOR (Cập nhật cho TruyenQQ) ---
