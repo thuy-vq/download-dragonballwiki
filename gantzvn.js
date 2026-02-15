@@ -6,19 +6,19 @@ const axios = require('axios');
 // --- CẤU HÌNH ---
 // URL gốc của truyện (không bao gồm phần chap)
 // Ví dụ Oneshot: https://gantzvn.com/truyen/ten-truyen-oneshot/
-const BASE_URL = 'https://gantzvn.com/truyen/gantz-nishi'; 
+const BASE_URL = 'https://gantzvn.com/truyen/gantz-full-color/'; 
 
 // --- CHẾ ĐỘ 1: TẢI THEO DANH SÁCH TÊN CỤ THỂ (Dùng cho Oneshot, Chap đặc biệt) ---
 // Điền các đuôi URL vào đây. Nếu mảng này CÓ dữ liệu, tool sẽ chạy theo list này và BỎ QUA chế độ lặp số.
 // Ví dụ: ['oneshot', 'chap-0', 'chap-dac-biet'] -> Tải .../oneshot/, .../chap-0/
-const CUSTOM_SLUGS = ['/oneshot']; 
+const CUSTOM_SLUGS = []; 
 
 // --- CHẾ ĐỘ 2: TẢI THEO SỐ THỨ TỰ (Chạy khi CUSTOM_SLUGS rỗng) ---
-const START_CHAP = 280;         
-const END_CHAP = 285;           
+const START_CHAP = 1;         
+const END_CHAP = 1;           
 
 // Các đuôi mở rộng cần thử cho chap lẻ (Chỉ dùng cho Chế độ 2)
-const TRY_SUFFIXES = ['', '-1', '-5']; 
+const TRY_SUFFIXES = ['']; 
 
 // --- CẤU HÌNH CHUNG ---
 const OUTPUT_DIR = './gantzvn_Manga';
